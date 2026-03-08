@@ -1,0 +1,105 @@
+# BUILD SYSTEM DEMO
+
+build myapp
+
+# Variables (build-local)
+set language "python"
+set version "3.11"
+set env "production"
+set output "./dist"
+
+# Environment variables 
+export APP_NAME "myapp"
+export APP_ENV "${env}"
+
+echo "Building ${APP_NAME} v${version} in ${env} mode"
+
+# Conditionals 
+if ${env} == "production"
+  echo "Production build — optimizations enabled"
+elif ${env} == "staging"
+  echo "Staging build — partial optimizations"
+else
+  echo "Development build — debug mode"
+endif
+
+
+if not ${env} == "development"
+  echo "Running in non-dev mode"
+endif
+
+
+fn greet
+  echo "Hello, ${arg0}!"
+endfn
+
+fn banner
+  echo "============================"
+  echo "${arg0}"
+  echo "============================"
+endfn
+
+greet "world"
+greet "${APP_NAME}"
+banner "Build Started"
+
+# targets
+target clean
+  echo "Cleaning build artifacts..."
+  debug "Would delete ${output}"
+endtarget
+
+target setup
+  mkdir "${output}"
+  mkdir "${output}/assets"
+  echo "Directories created"
+endtarget
+
+target test
+  echo "Running test suite..."
+  run echo "All tests passed!"
+endtarget
+
+# Loop over items
+foreach mod in core utils api
+  echo "Processing module: ${mod}"
+endforeach
+
+# Capture command output into a variable
+capture hostname "hostname"
+echo "Building on host: ${hostname}"
+
+capture py_version "python3 --version"
+echo "Python: ${py_version}"
+
+# some more shit
+glob build_files "*.build"
+echo "Build files found: ${build_files}"
+
+
+parallel
+  run echo "task-1: compiling"
+  run echo "task-2: linting"
+  run echo "task-3: bundling"
+endparallel
+
+# Error handling with try/catch
+try
+  run false
+catch
+  warn "A command failed but we recovered"
+endtry
+
+# Requirements (build fails if not met)
+require ${env} == "production" || "Expected production environment"
+require language || "Language variable must be set"
+
+# Invoke a target
+invoke setup
+
+# Logging levels
+debug "This only shows in verbose mode"
+warn "Build nearing completion"
+
+banner "Build Complete"
+echo "Output: ${output}"

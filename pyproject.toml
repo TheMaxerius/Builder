@@ -1,0 +1,7 @@
+[project]
+name = "Builder"
+version = "0.1.0"
+description = ""
+authors = ["Max N. <maxerius.dev@gmail.com>"]
+requires-python = ">=3.11"
+dependencies = []
