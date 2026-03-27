@@ -32,6 +32,30 @@ To update, pull the latest changes — no reinstall needed since it's an editabl
 git pull
 ```
 
+### Ubuntu / Debian
+
+Modern Ubuntu and Debian systems (22.04+) block `pip install` system-wide due to PEP 668. Use `pipx` instead, which handles the isolated environment automatically:
+
+```bash
+sudo apt install pipx
+pipx ensurepath
+```
+
+Open a new terminal so the PATH update takes effect, then:
+
+```bash
+git clone https://github.com/TheMaxerius/builder.git
+cd builder
+pipx install -e .
+```
+
+If `builder` still isn't found, `~/.local/bin` may not be on your PATH. Add it permanently:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
 ---
 
 ## Getting Started
