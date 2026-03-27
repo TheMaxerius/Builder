@@ -10,7 +10,31 @@
 
  ---
 
- ## Getting Started
+## Installation
+
+**Requirements:** Python 3.11+
+
+```bash
+git clone https://github.com/TheMaxerius/builder.git
+cd builder
+pip install -e .
+```
+
+That's it. The `builder` command is now available globally.
+
+```bash
+builder --help
+```
+
+To update, pull the latest changes — no reinstall needed since it's an editable install.
+
+```bash
+git pull
+```
+
+---
+
+## Getting Started
 
  Create a file called `main.build`:
 
@@ -33,7 +57,7 @@
  Run it:
 
  ```bash
- python main.py
+ builder
  ```
 
  ---
