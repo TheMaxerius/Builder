@@ -62,6 +62,7 @@
  | `-t`, `--target` | Run a specific target (alternative to positional) |
  | `--list` | List all available targets and functions |
  | `--plan` | Show the full execution plan without running |
+ | `--watch` | Re-run build automatically when `.build` files change |
  | `--help` | Show help |
 
  ### Examples
@@ -78,6 +79,9 @@
 
  # Run with full debug output
  builder test -v
+
+ # Watch for changes and rebuild automatically
+ builder --watch
  ```
 
  ---
@@ -102,12 +106,82 @@
  run curl ${API_URL}/health
  ```
 
- Variables are interpolated anywhere with `${name}`. The interpreter checks build context first, then environment variables.
+ **`append`** adds a value to an existing variable (space-separated).
+
+ ```
+ set flags ""
+ append flags "-O2"
+ append flags "-Wall"
+ echo "Flags: ${flags}"   # -O2 -Wall
+ ```
+
+ **`env`** reads a variable from the OS environment with an optional fallback. The value is stored in the build context.
+
+ ```
+ env NODE_ENV "development"   # use $NODE_ENV if set, else "development"
+ env DATABASE_URL              # empty string if not set
+ echo "Mode: ${NODE_ENV}"
+ ```
+
+ **`dotenv`** loads variables from a `.env` file into the build context and into environment variables visible to all shell commands.
+
+ ```
+ dotenv ".env"                  # fail if not found
+ dotenv ".env.local" optional   # skip silently if not found
+ ```
+
+ The `.env` file follows standard format — `KEY=value`, `KEY="quoted value"`. Comments (`# ...`) are ignored.
+
+ Variables are interpolated anywhere with `${name}`. The interpreter checks build context first, then OS environment variables.
 
  ```
  set name "myapp"
  export APP_NAME "${name}"
  echo "Building ${APP_NAME}"
+ ```
+
+ #### Built-in Variables
+
+ These are automatically set at startup. You can use them anywhere without declaring them.
+
+ | Variable | Value |
+ |---|---|
+ | `${OS}` | `linux`, `darwin`, or `windows` |
+ | `${ARCH}` | CPU architecture, e.g. `x86_64` or `arm64` |
+ | `${CWD}` | Current working directory |
+ | `${HOME}` | Home directory |
+ | `${USER}` | Current user name |
+ | `${DATE}` | Today's date — `YYYY-MM-DD` |
+ | `${TIME}` | Current time — `HH:MM:SS` |
+ | `${TIMESTAMP}` | Unix timestamp (seconds) |
+ | `${BUILD_FILE}` | Absolute path to the current `.build` file |
+ | `${BUILD_DIR}` | Directory containing the `.build` file |
+
+ #### Interpolation Transforms
+
+ Apply transforms directly inside `${...}` without creating intermediate variables:
+
+ | Syntax | Result |
+ |---|---|
+ | `${upper:var}` | Uppercase: `HELLO` |
+ | `${lower:var}` | Lowercase: `hello` |
+ | `${trim:var}` | Strip leading/trailing whitespace |
+ | `${len:var}` | Length of the string value |
+ | `${var:-default}` | Value of `var`, or `default` if empty/unset |
+ | `${var:+word}` | `word` if `var` is set and non-empty, else `""` |
+ | `${env:VAR}` | Read directly from OS environment |
+ | `${env:VAR:fallback}` | OS environment variable with fallback |
+
+ ```
+ set tag "  v1.2.3  "
+ echo "${trim:tag}"           # v1.2.3
+ echo "${upper:tag}"          # V1.2.3
+ echo "${len:tag}"            # 9 (after trim, not auto-applied)
+
+ set mode ""
+ echo "${mode:-production}"   # production (mode is empty)
+
+ echo "${env:CI:false}"       # true on CI, false locally
  ```
 
  ---
@@ -204,6 +278,7 @@
  | `startswith` | `if ${name} startswith "app"` |
  | `endswith` | `if ${file} endswith ".py"` |
  | `matches` | `if ${ver} matches "^[0-9]+$"` (regex) |
+ | `exists` | `if exists "./dist"` (file/directory exists) |
 
  Negate any condition with `not`:
 
@@ -266,6 +341,128 @@
  require api_key || "API_KEY must be set"
  ```
 
+ **`check`** asserts that a command is installed and available on `PATH`. Use it to verify your toolchain before the build starts.
+
+ ```
+ check node         || "Node.js is required — https://nodejs.org"
+ check python3      || "Python 3 is required"
+ check docker
+ ```
+
+ On success it prints the resolved path. On failure it raises a build error with your custom message (or a default one).
+
+ **`port free`** checks whether a TCP port is available (nothing is listening on it). Like `check`, it supports a custom error message and can store its result instead of failing.
+
+ ```
+ # Hard check — fail if busy
+ port free 3000
+ port free ${PORT} || "Port ${PORT} is already in use on ${OS}"
+
+ # Soft check — store "free" or "" and continue either way
+ port free 3000 → api_port_free
+ if not api_port_free
+   warn "Port 3000 is taken — you may need to stop another process"
+ endif
+
+ # Via set
+ set api_slot port free 8080
+ if api_slot
+   echo "Port 8080 is free, starting server"
+ endif
+ ```
+
+ The stored value is `"free"` when the port is available, or `""` (empty) when it is in use — so `if port_var` and `if not port_var` work naturally.
+
+ ---
+
+ ### npm and Cargo
+
+ **`npm`** runs any npm subcommand. Append `in "<dir>"` to run it in a subdirectory.
+
+ ```
+ npm install
+ npm ci
+ npm run build
+ npm run dev in "frontend"
+ npm install in "packages/web"
+ npm test in "apps/api"
+ ```
+
+ **`cargo`** runs any Cargo subcommand. Same `in "<dir>"` suffix works identically.
+
+ ```
+ cargo build
+ cargo build --release
+ cargo build --release in "api"
+ cargo test in "crates/core"
+ cargo check
+ cargo clippy
+ cargo fmt
+ ```
+
+ Both commands log with their own `[npm]` / `[cargo]` step label and accept `${variables}` anywhere in the arguments.
+
+ ---
+
+ ### Reading Build Manifests
+
+ **`json`** reads a value from any JSON file and stores it in a variable. Supports dotted key paths. The variable name defaults to the last key segment.
+
+ ```
+ json version from "package.json"                # → ${version}
+ json name    from "package.json" as app_name    # → ${app_name}
+ json scripts.build from "package.json" as build_cmd
+ json engines.node  from "package.json" as node_req
+ ```
+
+ **`toml`** reads a value from any TOML file. Bare keys automatically look inside `[package]`, making it ergonomic for `Cargo.toml`.
+
+ ```
+ toml version from "Cargo.toml"                   # → ${version}  (reads [package].version)
+ toml name    from "Cargo.toml" as crate_name      # → ${crate_name}
+ toml dependencies.serde from "Cargo.toml"         # → ${serde}  (reads [dependencies].serde)
+ toml workspace.resolver from "Cargo.toml" as res
+ ```
+
+ ---
+
+ ### Semver Comparisons
+
+ Version strings can be compared in `if` conditions using `semver` operators. Leading `v` is stripped automatically and pre-release labels are ignored.
+
+ ```
+ if ${NODE_VERSION} semver< "18.0.0"
+     error "Node.js 18+ required (found ${NODE_VERSION})"
+ endif
+
+ if ${CARGO_VERSION} semver>= "1.70.0"
+     echo "Cargo 1.70+ — sparse registry enabled"
+ endif
+ ```
+
+ Available operators: `semver==`, `semver!=`, `semver>`, `semver>=`, `semver<`, `semver<=`.
+
+ ---
+
+ ### Tool Version Variables
+
+ The following variables are auto-detected at startup (empty string if the tool is not installed):
+
+ | Variable | Source |
+ |---|---|
+ | `${NODE_VERSION}` | `node --version` |
+ | `${NPM_VERSION}` | `npm --version` |
+ | `${PNPM_VERSION}` | `pnpm --version` |
+ | `${YARN_VERSION}` | `yarn --version` |
+ | `${BUN_VERSION}` | `bun --version` |
+ | `${RUSTC_VERSION}` | `rustc --version` |
+ | `${CARGO_VERSION}` | `cargo --version` |
+ | `${PYTHON_VERSION}` | `python3 --version` |
+ | `${GO_VERSION}` | `go version` |
+ | `${DENO_VERSION}` | `deno --version` |
+
+ Use `if not NODE_VERSION` / `if not CARGO_VERSION` to branch on whether a tool is installed.
+
  ---
 
  ### Shell Commands
@@ -289,6 +486,20 @@
  ```
  from frontend run "npm run build"
  from backend run "cargo build --release"
+ ```
+
+ **`timeout`** runs a command with a time limit. The build fails if the command does not finish in time.
+
+ ```
+ timeout 30 run "npm install"
+ timeout 60 from "backend" run "cargo build --release"
+ ```
+
+ **`retry`** retries a failing command up to N times with exponential back-off (0.5s, 1.0s, 1.5s, capped at 3s).
+
+ ```
+ retry 3 run "curl -f https://api.example.com/health"
+ retry 5 from "infra" run "terraform apply -auto-approve"
  ```
 
  ---
@@ -373,6 +584,21 @@
  | `warn` | Printed with yellow highlight |
  | `error` | Printed with red highlight, stops the build |
 
+ **`section`** prints a bold section header that visually separates phases of a long build. Useful for readability in CI logs.
+
+ ```
+ section "Toolchain Check"
+ check node || "Node.js is required"
+ check python3
+
+ section "Building"
+ from frontend run "npm run build"
+ from backend run "cargo build --release"
+
+ section "Deploy"
+ invoke deploy
+ ```
+
  ---
 
  ### Other
@@ -427,13 +653,17 @@
 
  | Category | Keywords |
  |---|---|
- | Variables | `set`, `export` |
- | Output | `echo`, `debug`, `warn`, `error` |
- | Shell | `run`, `capture`, `from` |
+ | Variables | `set`, `export`, `append`, `env`, `dotenv` |
+ | Output | `echo`, `debug`, `warn`, `error`, `section` |
+ | Shell | `run`, `capture`, `from`, `timeout`, `retry` |
  | Files | `copy`, `move`, `delete`, `mkdir`, `glob` |
+ | Assertions | `require`, `check`, `port` |
+ | npm / Node | `npm`, `json` |
+ | Rust / Cargo | `cargo`, `toml` |
  | Control | `if`, `elif`, `else`, `endif`, `foreach`, `endforeach` |
- | Error handling | `try`, `catch`, `endtry`, `require` |
+ | Error handling | `try`, `catch`, `endtry` |
  | Functions | `fn`, `endfn` |
  | Targets | `target`, `endtarget`, `invoke` |
- | Composition | `parallel`, `endparallel`, `include`, `import`, `install` |
+ | Concurrency | `parallel`, `endparallel`, `spawn`, `endspawn` |
+ | Composition | `include`, `import`, `install` |
  | Build | `build`, `exit` |
