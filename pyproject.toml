@@ -1,7 +1,13 @@
 [project]
 name = "Builder"
 version = "0.1.0"
-description = ""
-authors = ["Max N. <maxerius.dev@gmail.com>"]
+description = "A modern build automation tool with a clean scripting language"
+authors = [{name = "Max N.", email = "maxerius.dev@gmail.com"}]
 requires-python = ">=3.11"
 dependencies = []
+
+[project.scripts]
+builder = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
